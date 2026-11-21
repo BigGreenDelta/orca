@@ -26,6 +26,8 @@ export type AgentCardScope = {
   settings: AgentLaunchSettings
   mutate: (mutation: AgentLaunchSettingsMutation) => Promise<void>
   local?: LocalAgentSettings
+  /** An agent copy's card, whose editors never wait on its agent's CLI detection. */
+  isCopy?: true
 }
 
 type AgentCardRows = (agent: AgentCatalogEntry, listedInstalled: boolean) => AgentCatalogRowProps
@@ -47,6 +49,7 @@ export function agentCopyCardRows(args: {
   ): AgentCatalogRowProps => {
     const view = applyAgentCopy(base.settings, copy)
     const row = card({
+      isCopy: true,
       settings: projectAgentLaunchSettings(view, platform),
       mutate: copies.mutate(copy.id),
       local: {
@@ -72,7 +75,7 @@ export function agentCopyCardRows(args: {
       cliUpdate: undefined,
       chatRuntime: undefined,
       sessionSourceHome: undefined,
-      onDuplicate: () => copies.duplicate(agent, copy),
+      onDuplicate: () => copies.duplicate(agent, copy.id),
       initiallyExpanded: copies.created === copy.id,
       copy: {
         baseLabel: agent.label,
@@ -82,7 +85,8 @@ export function agentCopyCardRows(args: {
             key={copy.id}
             copy={copy}
             taken={copies.list.filter((other) => other.id !== copy.id).map((other) => other.id)}
-            onChange={(identity) => copies.rename(copy.id, identity)}
+            onRename={(name) => copies.rename(copy.id, name)}
+            onChangeId={(id) => copies.changeId(copy.id, id)}
           />
         )
       }

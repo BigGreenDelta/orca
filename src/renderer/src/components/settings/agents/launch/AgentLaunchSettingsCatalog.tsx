@@ -169,7 +169,7 @@ export function AgentLaunchSettingsCatalog({
   const copies = useAgentCopySettings(local)
   const platform = window.api.platform.get().platform
   // One card's props from its scope; the agent's own card and each copy's card are built alike.
-  const agentCard = ({ settings, mutate, local }: AgentCardScope) => {
+  const agentCard = ({ settings, mutate, local, isCopy }: AgentCardScope) => {
     const save = (mutation: AgentLaunchSettingsMutation): void => {
       const scopedMutation =
         mutation.type === 'permissions' && nativeChatPermissionsSupported
@@ -298,13 +298,16 @@ export function AgentLaunchSettingsCatalog({
         local && isDetected && agent.id === 'codex'
           ? buildCodexSessionSourceHomeControl(local.settings, local.updateSettings)
           : undefined,
-      onDuplicate: local && isDetected ? () => copies.duplicate(agent) : undefined
+      // A chat-only install copies too: a copy runs through its agent's own launch paths.
+      onDuplicate:
+        local && (isDetected || chatOnly.has(agent.id)) ? () => copies.duplicate(agent) : undefined
     })
     const rowProps = (
       agent: (typeof catalog)[number],
       listedInstalled: boolean
     ): AgentCatalogRowProps => {
-      const isDetected = listedInstalled && detectedIds?.has(agent.id) === true
+      // A copy keeps its own command, arguments and environment editors whether or not its agent's CLI is found.
+      const isDetected = isCopy === true || (listedInstalled && detectedIds?.has(agent.id) === true)
       return {
         ...cliRowProps(agent, isDetected),
         opensAs: local

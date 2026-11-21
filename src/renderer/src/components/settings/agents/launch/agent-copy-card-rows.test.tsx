@@ -20,6 +20,7 @@ const copy = {
 }
 
 function setup(local = true) {
+  const baseUpdateSettings = vi.fn()
   // oxlint-disable-next-line typescript/consistent-type-assertions -- SAFETY: a partial settings object; the builder reads only the copy and command slots.
   const settings = {
     agentCmdOverrides: { claude: 'claude-base' },
@@ -32,6 +33,7 @@ function setup(local = true) {
     mutate: vi.fn(() => vi.fn(async () => {})),
     saveEnvironment: vi.fn(() => vi.fn(async () => {})),
     rename: vi.fn(async () => {}),
+    changeId: vi.fn(async () => {}),
     setChat: vi.fn(async () => {}),
     setEnabled: vi.fn(async () => {}),
     remove: vi.fn(async () => {})
@@ -39,7 +41,7 @@ function setup(local = true) {
   const scopes: AgentCardScope[] = []
   const rows = agentCopyCardRows({
     local: local
-      ? { settings, saveEnvironment: vi.fn(async () => {}), updateSettings: vi.fn() }
+      ? { settings, saveEnvironment: vi.fn(async () => {}), updateSettings: baseUpdateSettings }
       : undefined,
     copies,
     platform: 'linux',
@@ -57,7 +59,7 @@ function setup(local = true) {
         }) as unknown as AgentCatalogRowProps
     }
   })(claude, true)
-  return { rows, copies, scopes }
+  return { rows, copies, scopes, baseUpdateSettings }
 }
 
 describe("an agent copy's card", () => {
@@ -65,6 +67,7 @@ describe("an agent copy's card", () => {
     const { rows, scopes } = setup()
     expect(rows.map((row) => [row.rowId, row.label])).toEqual([['claude.haiku', 'Claude Haiku']])
     expect(scopes[0]?.local?.settings.agentCmdOverrides).toEqual({ claude: '/opt/haiku/claude' })
+    expect(scopes[0]?.isCopy).toBe(true)
     expect(rows[0]).toMatchObject({
       agentId: 'claude',
       isSavedDefault: false,
@@ -75,7 +78,7 @@ describe("an agent copy's card", () => {
   })
 
   it("saves its Chat | CLI pick, on/off and delete into the copy, never into its agent's", () => {
-    const { rows, copies, scopes } = setup()
+    const { rows, copies, scopes, baseUpdateSettings } = setup()
     const row = rows[0]!
     row.opensAs?.onChange('chat')
     row.onSetEnabled(false)
@@ -84,8 +87,14 @@ describe("an agent copy's card", () => {
     expect(copies.setEnabled).toHaveBeenCalledWith('claude.haiku', false)
     expect(copies.remove).toHaveBeenCalledWith('claude.haiku')
     expect(copies.mutate).toHaveBeenCalledWith('claude.haiku')
+    row.onDuplicate?.()
+    expect(copies.duplicate).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'claude' }),
+      'claude.haiku'
+    )
     void scopes[0]?.local?.updateSettings({ nativeChatProviders: { claude: true } })
     expect(copies.setChat).toHaveBeenCalledTimes(1)
+    expect(baseUpdateSettings).not.toHaveBeenCalled()
   })
 
   it("is absent on a paired host's page", () => {
