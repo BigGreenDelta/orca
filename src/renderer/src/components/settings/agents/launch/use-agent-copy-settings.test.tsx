@@ -85,4 +85,59 @@ describe('agent copy writes', () => {
     })
     expect(saved()[1]).toMatchObject({ agent: 'claude', name: 'A2 copy', command: 'old' })
   })
+
+  it('sends edits to a copy that took a vacated id to that copy, not to the one renamed away', async () => {
+    const { result, saved } = setup([
+      { id: 'claude.a', name: 'A', agent: 'claude' },
+      { id: 'claude.c', name: 'C', agent: 'claude' }
+    ])
+    await act(() => result.current.changeId('claude.a', 'claude.b'))
+    await act(() => result.current.changeId('claude.c', 'claude.a'))
+    await act(() => result.current.rename('claude.a', 'New A'))
+    await act(() => result.current.remove('claude.a'))
+    expect(saved()).toEqual([{ id: 'claude.b', name: 'A', agent: 'claude' }])
+  })
+
+  it('duplicates nothing when the copy to duplicate was deleted first', async () => {
+    const { result, saved } = setup([{ id: 'claude.a', name: 'A', agent: 'claude' }])
+    await act(async () => {
+      const removed = result.current.remove('claude.a')
+      result.current.duplicate({ id: 'claude', label: 'Claude' }, 'claude.a')
+      await removed
+      await vi.waitFor(() => expect(toast.error).toHaveBeenCalled())
+    })
+    expect(saved()).toEqual([])
+  })
+
+  it('sends edits to a duplicate that took a vacated id to the duplicate', async () => {
+    const { result, saved } = setup([])
+    const claude = { id: 'claude' as const, label: 'Claude' }
+    await act(async () => {
+      result.current.duplicate(claude)
+      await vi.waitFor(() => expect(saved()).toHaveLength(1))
+    })
+    const first = saved()[0]!.id
+    await act(() => result.current.changeId(first, 'claude.b'))
+    await act(async () => {
+      result.current.duplicate(claude)
+      await vi.waitFor(() => expect(saved()).toHaveLength(2))
+    })
+    expect(saved()[1]!.id).toBe(first)
+    await act(() => result.current.remove(first))
+    expect(saved().map((copy) => copy.id)).toEqual(['claude.b'])
+  })
+
+  it("keeps the original copy's queued edit on it when a duplicate takes its old id meanwhile", async () => {
+    const { result, saved } = setup([{ id: 'claude.claude-copy', name: 'A', agent: 'claude' }])
+    await act(async () => {
+      const moved = result.current.changeId('claude.claude-copy', 'claude.b')
+      result.current.duplicate({ id: 'claude', label: 'Claude' })
+      const edited = result.current.rename('claude.claude-copy', 'Edited')
+      await Promise.all([moved, edited])
+    })
+    expect(saved()).toEqual([
+      { id: 'claude.b', name: 'Edited', agent: 'claude' },
+      expect.objectContaining({ id: 'claude.claude-copy', name: 'Claude copy' })
+    ])
+  })
 })
