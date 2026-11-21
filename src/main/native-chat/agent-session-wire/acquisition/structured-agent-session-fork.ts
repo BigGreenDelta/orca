@@ -2,20 +2,17 @@ import {
   admitStructuredAgentSessionFork,
   type StructuredAgentSessionForkInput
 } from './structured-agent-session-fork-source'
-import { prepareForkSnapshot } from './structured-agent-session-fork-snapshot'
-import { agentSessionJournalProviderHandle } from '../../../../shared/agent-session/lifecycle/agent-session-provider-handle-encoding'
-import { defaultAgentChatLabel } from '../../../../shared/agent-session/agent-session-chat-label'
-import {
-  normalizeAgentSessionConversationName,
-  AGENT_SESSION_CONVERSATION_NAME_MAX_LENGTH
-} from '../../../../shared/agent-session/agent-session-conversation-name'
-import { sliceAtCodeUnitLimit } from '../../../../shared/surrogate-safe-text-slice'
+import { agentSessionJournalProviderHandle } from '../../../../shared/agent-session/lifecycle/provider-handles/agent-session-provider-handle-encoding'
+import { defaultAgentChatLabel } from '../../../../shared/agent-session/conversation-naming/agent-session-chat-label'
+import { normalizeAgentSessionConversationName } from '../../../../shared/agent-session/conversation-naming/agent-session-conversation-name'
+import { agentSessionRecordShownName } from '../../../runtime/agent-session/records/agent-session-record-shown-name'
 import { AgentConversationCopyError } from '../../conversation-adoption/agent-conversation-copy-error'
 import { acpAgentName } from '../../../acp/session/acp-structured-agent-definitions'
 import { AGENT_CHAT_PERMISSION_MODE_OPTION_ID } from '../../../../shared/agent-launch/permissions/agent-chat-permission-mode'
 import { isAgentSessionRefusalError } from '../../../../shared/agent-session/failures/agent-session-wire-refusals'
-import { requireUnownedStructuredAgentSessionAdoption } from '../../../runtime/agent-session/structured-agent-session-create-adoption'
+import { requireUnownedStructuredAgentSessionAdoption } from '../../../runtime/agent-session/ownership/structured-agent-session-create-adoption'
 import type { AgentSessionAttachParams } from './structured-agent-session-attach'
+import { findAgentCopy } from '../../../../shared/agent-launch/catalog/agent-copies'
 
 export async function prepareStructuredAgentSessionFork(
   input: StructuredAgentSessionForkInput
@@ -24,6 +21,7 @@ export async function prepareStructuredAgentSessionFork(
   const name = acpAgentName(input.agent)
   const {
     record,
+    proof,
     metadata,
     transcriptImport,
     selected,
@@ -33,8 +31,17 @@ export async function prepareStructuredAgentSessionFork(
     fail,
     throughItemId
   } = await admitStructuredAgentSessionFork(input)
+  // The fork runs as the source's copy; a deleted one refuses before the provider copies anything.
+  if (
+    record.agentCopy &&
+    input.readAgentCopySettings &&
+    findAgentCopy(input.readAgentCopySettings(), record.agentCopy)?.agent !== input.agent
+  ) {
+    throw new Error(`Unknown agent copy "${record.agentCopy}"`)
+  }
+  // The fork mark comes from the record's forkedFrom, so the name stays the source's own.
   const title = normalizeAgentSessionConversationName(
-    `${sliceAtCodeUnitLimit(record.conversationName?.trim() || defaultAgentChatLabel(input.agent), AGENT_SESSION_CONVERSATION_NAME_MAX_LENGTH - 5)} fork`
+    agentSessionRecordShownName(host.deps.store, record) || defaultAgentChatLabel(input.agent)
   )!
   const copy = await host.deps.adapter.copyConversation!({
     record,
@@ -69,7 +76,7 @@ export async function prepareStructuredAgentSessionFork(
       'providerRejected'
     )
   })
-  const current = await requireCurrent()
+  await requireCurrent()
   if (!copy.sessionId.trim() || copy.sessionId === providerSessionId) {
     fail(`${name} did not save an independent chat copy. Try again.`)
   }
@@ -85,9 +92,8 @@ export async function prepareStructuredAgentSessionFork(
     nativeId: transcriptImport.handleNamesTranscript ? copy.filePath! : copy.sessionId,
     ...(copy.resumeCursor ? { resumeCursor: copy.resumeCursor } : {})
   }
-  const prepared = prepareForkSnapshot({
-    snapshot: current.snapshot,
-    nextItemId: current.boundary.nextItemId,
+  const prepared = await host.deps.journalDatabase.prepareForkCopy({
+    source: proof,
     ...(input.agent === 'codex'
       ? { sourceThreadId: providerSessionId, childThreadId: copy.sessionId }
       : {})
@@ -101,6 +107,11 @@ export async function prepareStructuredAgentSessionFork(
         await requireCurrent()
       },
       prepared,
+      withAdmission: (run) =>
+        host.withForkSourceAdmission(record.sessionId, async () => {
+          await requireCurrent()
+          return run()
+        }),
       ...(copy.coverage
         ? {
             historyOrigin: {
@@ -129,6 +140,7 @@ export async function prepareStructuredAgentSessionFork(
         : {})
     },
     ...(record.launchArgs ? { launchArgs: record.launchArgs } : {}),
+    ...(record.agentCopy ? { agentCopy: record.agentCopy } : {}),
     adopt: { providerHandle, conversationName: title }
   }
 }

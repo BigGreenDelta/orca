@@ -3,8 +3,9 @@ import {
   agentPermissionHostPlatform,
   permissionEnvNameMatches
 } from '../permissions/agent-permission-env'
-import type { GlobalSettings } from '../../global-settings-types'
+import type { GlobalSettings } from '../../settings/global-settings-types'
 import { isTuiAgent } from '../catalog/tui-agent-config'
+import { normalizeAgentCopies } from '../catalog/agent-copies'
 import { YOLO_TUI_AGENT_ARGS, YOLO_TUI_AGENT_ENV } from '../permissions/tui-agent-permissions'
 import {
   readLaunchPermissionChoice,
@@ -22,7 +23,7 @@ import {
   type AgentStartupShell
 } from '../startup/tui-agent-startup-shell'
 import type { TuiAgent } from '../catalog/tui-agent'
-import { resolveLocalWindowsAgentStartupShell } from '../../windows-terminal-shell'
+import { resolveLocalWindowsAgentStartupShell } from '../../shell/launch/windows-terminal-shell'
 
 const UNSUPPORTED_TUI_AGENT_ARGS: Partial<Record<TuiAgent, readonly string[]>> = {
   opencode: ['--dangerously-skip-permissions'],
@@ -161,6 +162,9 @@ export function sanitizeAgentLaunchProfileUpdates(
   }
   if ('agentLaunchChoices' in updates) {
     target.agentLaunchChoices = normalizeAgentLaunchChoices(updates.agentLaunchChoices)
+  }
+  if ('agentCopies' in updates) {
+    target.agentCopies = normalizeAgentCopies(updates.agentCopies)
   }
   sanitizeAgentPermissionUpdates(target, updates)
 }

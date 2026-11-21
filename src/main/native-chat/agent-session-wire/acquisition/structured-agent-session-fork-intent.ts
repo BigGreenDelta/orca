@@ -1,9 +1,10 @@
+import type { AgentCopySettings } from '../../../../shared/agent-launch/catalog/agent-copies'
 import { prepareStructuredAgentSessionFork } from './structured-agent-session-fork'
-import { resolveCommittedStructuredAgentSessionAdoptionIntent } from '../../../runtime/agent-session/structured-agent-session-create-adoption'
+import { resolveCommittedStructuredAgentSessionAdoptionIntent } from '../../../runtime/agent-session/ownership/structured-agent-session-create-adoption'
 import { agentConversationCopyRefusal } from '../../conversation-adoption/agent-conversation-copy-error'
 import { acpAgentName } from '../../../acp/session/acp-structured-agent-definitions'
 import type { AgentSessionExecutionLocation } from '../../../../shared/agent-session/lifecycle/agent-session-record'
-import type { StructuredAgentId } from '../../../../shared/agent-session/lifecycle/agent-session-provider-handle'
+import type { StructuredAgentId } from '../../../../shared/agent-session/lifecycle/provider-handles/agent-session-provider-handle'
 import type { StructuredAgentSessionHost } from '../host/structured-agent-session-host'
 import type { AgentSessionAttachParams } from './structured-agent-session-attach'
 
@@ -14,6 +15,7 @@ export async function resolveStructuredAgentSessionForkIntent(input: {
   location: AgentSessionExecutionLocation
   envelope: { sessionId: string; clientOperationId: string }
   callerKey?: string
+  readAgentCopySettings?: () => AgentCopySettings
 }): Promise<AgentSessionAttachParams> {
   const { host } = input
   if (!host) {

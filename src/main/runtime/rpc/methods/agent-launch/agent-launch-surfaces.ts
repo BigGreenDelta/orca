@@ -1,11 +1,15 @@
+import {
+  agentCopyIdFromLaunchOptions,
+  withoutAgentCopyOption
+} from '../../../../../shared/agent-launch/catalog/agent-copies'
 import { terminalImageViewerSupported } from '../../../terminal/launch/terminal-image-viewer-env'
 /** Use ordinary user-facing terminal/chat creation; worker factories add redrive, mailbox and background-tab behavior.
  * The executor selects surface and prompt delivery; this factory supplies the wire-shaped runtime calls. */
 
 import { callerLaunchSource } from '../../../../agent-launch/agent-started-telemetry'
 import { randomUUID } from 'node:crypto'
-import { narrowStructuredLaunchSeedOptions } from '../../../../../shared/native-chat/input/native-chat-session-option-defaults'
-import { createStructuredAgentSessionOperationId } from '../../../../../shared/agent-session/lifecycle/structured-agent-session-mutation'
+import { narrowStructuredLaunchSeedOptions } from '../../../../../shared/native-chat/input/session-options/native-chat-session-option-defaults'
+import { createStructuredAgentSessionOperationId } from '../../../../../shared/agent-session/lifecycle/operations/structured-agent-session-mutation'
 import { structuredAgentSessionTabId } from '../../../../../shared/agent-session/view/structured-agent-session-projection'
 import {
   AgentLaunchStructuredSessionRefusedError,
@@ -14,14 +18,14 @@ import {
 import { getStructuredAgentSessionHost } from '../../../../native-chat/agent-session-wire/host/structured-agent-session-registry'
 import type { StructuredAgentSessionHost } from '../../../../native-chat/agent-session-wire/host/structured-agent-session-host'
 import type { RpcContext } from '../../core'
-import { STARTUP_CWD_FALLBACK_SENTENCE } from '../../../../../shared/startup-cwd-fallback'
+import { STARTUP_CWD_FALLBACK_SENTENCE } from '../../../../../shared/shell/launch/startup-cwd-fallback'
 import { structuredCallerFor } from '../structured-sessions/creation/structured-agent-session-gate'
 import { createStructuredAgentSessionForWorktree } from '../structured-sessions/creation/structured-agent-session-create'
-import { structuredAgentRuntimeMetadata } from '../../../agent-session/installation/structured-agent-runtime-metadata'
+import { supportedStructuredSeedOptions } from '../../../agent-session/installation/structured-agent-runtime-metadata'
 import { deliverTerminalAgentLaunchPrompt } from './agent-launch-terminal-prompt'
 import { AgentLaunchSessionAlreadyExistsError } from '../../../../../shared/agent-launch/contracts/agent-launch-session-already-exists'
-import { AGENT_SESSION_CREATE_MESSAGE_RUNTIME_CAPABILITY } from '../../../../../shared/agent-session/agent-session-create-capabilities'
-import { createStructuredAgentSessionId } from '../../../../../shared/agent-session/structured-agent-session-create'
+import { AGENT_SESSION_CREATE_MESSAGE_RUNTIME_CAPABILITY } from '../../../../../shared/agent-session/lifecycle/operations/agent-session-create-capabilities'
+import { createOrcaSessionId } from '../../../../../shared/agent-session/identity/orca-session-address'
 import { toAgentLaunchPreferences } from '../../../../../shared/agent-launch/choices/agent-launch-preferences'
 import { paneIdentity } from '../../../terminal/identity/runtime-terminal-pane-identity'
 import {
@@ -60,14 +64,16 @@ export function agentLaunchSurfaceFactory(
       firstMessage,
       signal
     }) => {
-      const sessionId = requested ?? createStructuredAgentSessionId(agent, randomUUID)
-      const definition = structuredAgentRuntimeMetadata(agent)?.definition
-      const supported = Object.fromEntries(
-        Object.entries(narrowStructuredLaunchSeedOptions(options) ?? {}).filter(([key]) =>
-          definition?.restingOptions.acceptsKey(key)
-        )
+      const sessionId = requested ?? createOrcaSessionId(randomUUID)
+      const agentCopy = agentCopyIdFromLaunchOptions(options, chatOptions)
+      const supported = supportedStructuredSeedOptions(
+        agent,
+        narrowStructuredLaunchSeedOptions(options)
       )
-      const seeded = chatOptions ?? (Object.keys(supported).length > 0 ? supported : undefined)
+      // The copy rides in its own create field; as an option a host would refuse it.
+      const seeded =
+        withoutAgentCopyOption(chatOptions) ??
+        (Object.keys(supported).length > 0 ? supported : undefined)
       // A client that creates chats without starting them starts this one on its first message.
       const atRest =
         firstMessage !== undefined ||
@@ -95,6 +101,7 @@ export function agentLaunchSurfaceFactory(
         agent,
         ...(chatOptions?.model ? { optionsMode: 'replace-model-selection' as const } : {}),
         ...(seeded ? { options: seeded } : {}),
+        ...(agentCopy ? { agentCopy } : {}),
         ...(tabId ? { tabId } : {}),
         ...(atRest ? { atRest: true as const } : {}),
         ...(firstMessage ? { firstMessage } : {}),

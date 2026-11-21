@@ -1,13 +1,13 @@
 import { OrcaRuntimeWithResolveWorktreeRemovalTarget } from '../../workspaces/workspace-removal-target'
 import type { TerminalWorkspaceLaunchScope } from '../../orchestration/terminal-authority/structured-sessions/runtime-legacy-worker-terminal-recovery-types'
 import type { TuiAgent } from '../../../../shared/agent-launch/catalog/tui-agent'
-import { parseWslUncPath } from '../../../../shared/wsl-paths'
+import { parseWslUncPath } from '../../../../shared/file-access/wsl-paths'
 import type {
   AgentLaunchPreferences,
   RuntimeAgentSessionRpcCaller,
   RuntimeEnsureAgentSessionRequest,
   RuntimeEnsureAgentSessionResult
-} from '../../../../shared/agent-session/agent-session-host-authority'
+} from '../../../../shared/agent-session/lifecycle/operations/agent-session-host-authority'
 import {
   canonicalizeAgentSessionIdentity,
   type ProviderExecutionNamespace
@@ -16,12 +16,14 @@ import { isTuiAgentEnabled } from '../../../../shared/agent-launch/catalog/tui-a
 import { buildAgentResumeStartupPlan } from '../../../../shared/agent-launch/startup/tui-agent-resume-startup'
 import { agentLaunchQuotingShell } from '../../../../shared/agent-launch/startup/agent-launch-runtime'
 import { OrchestrationError } from '../../orchestration/orchestration-error'
-import { withAgentSessionAccountEnv } from '../../agent-session/agent-session-account-env'
+import { withAgentSessionAccountEnv } from '../../agent-session/environment/agent-session-account-env'
 import { resolveWslHostAgentResumeInputs } from '../../terminal/launch/wsl-host-agent-terminal-launch'
 import type { SleepingAgentLaunchConfig } from '../../../../shared/agent-session/lifecycle/agent-session-resume'
 import { isTerminalLeafId, makePaneKey } from '../../../../shared/workspace-layout/stable-pane-id'
 import { resolveSavedRestoreLaunchRecipe } from './saved-restore-launch-recipe'
 import { worktreeIdsEqual } from '../../../../shared/worktree/id'
+import { agentLaunchPreferenceOptions } from '../../../../shared/agent-launch/choices/agent-launch-preferences'
+import { applyAgentCopy, findAgentCopy } from '../../../../shared/agent-launch/catalog/agent-copies'
 import {
   resolveTuiAgentLaunchRawArgs,
   resolveTuiAgentLaunchEnv
@@ -79,15 +81,7 @@ export abstract class OrcaRuntimeWithGetAgentSessionExecutionNamespace extends O
   protected toAgentSessionOptions(
     preferences: AgentLaunchPreferences | undefined
   ): Record<string, string> | undefined {
-    if (!preferences) {
-      return undefined
-    }
-    const options = {
-      ...(preferences.model ? { model: preferences.model } : {}),
-      ...(preferences.effort ? { effort: preferences.effort } : {}),
-      ...(preferences.mode ? { mode: preferences.mode } : {})
-    }
-    return Object.keys(options).length > 0 ? options : undefined
+    return agentLaunchPreferenceOptions(preferences)
   }
 
   /** A saved restore replays the source pane as this host ran it; History and other user resumes keep current settings. */
@@ -113,7 +107,9 @@ export abstract class OrcaRuntimeWithGetAgentSessionExecutionNamespace extends O
       providerSession: request.providerSession,
       record: record && worktreeIdsEqual(record.worktreeId, worktreeId) ? record : undefined,
       liveRow: sourcePaneKey
-        ? this.getAgentProviderSessionSnapshotFn?.().find((row) => row.paneKey === sourcePaneKey)
+        ? this.getAgentProviderSessionRowsForPaneFn?.(sourcePaneKey).find(
+            (row) => row.paneKey === sourcePaneKey
+          )
         : undefined
     })
   }
@@ -157,10 +153,17 @@ export abstract class OrcaRuntimeWithGetAgentSessionExecutionNamespace extends O
       identity,
       canonicalWorktreeId: workspace.id
     })
-    const settings = this.store.getSettings()
-    if (!isTuiAgentEnabled(request.agent, settings.disabledTuiAgents)) {
+    const savedSettings = this.store.getSettings()
+    if (!isTuiAgentEnabled(request.agent, savedSettings.disabledTuiAgents)) {
       throw new Error('Selected agent is disabled. Choose an enabled agent before resuming.')
     }
+    // A copy resumes with its own launch setup; one deleted since refuses before any terminal exists.
+    const copyId = request.launchPreferences?.agentCopy
+    const copy = copyId ? findAgentCopy(savedSettings, copyId) : undefined
+    if (copyId && copy?.agent !== request.agent) {
+      throw new Error(`Unknown agent copy "${copyId}"`)
+    }
+    const settings = copy ? applyAgentCopy(savedSettings, copy) : savedSettings
     const launchRuntime = this.resolveAgentLaunchRuntime(workspace, request.agent)
     const { platform } = launchRuntime
     const shell = agentLaunchQuotingShell(launchRuntime)

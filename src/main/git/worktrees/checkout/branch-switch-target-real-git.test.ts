@@ -8,8 +8,9 @@ import { installRealWorkerThreadChildProcesses } from '../../../worker-thread-ch
 import { switchBranchGuarded } from './branch-switch'
 import { BranchSwitchCollisionError } from './branch-switch-target'
 import { checkoutBranch, listLocalBranches } from './checkout'
-import { getStatus } from '../../source-control/status-read'
+import { getStatus } from '../../source-control/status/status-read'
 import { searchRemoteRefPage } from '../../refs/resolution/repo-remote-ref-search'
+import { normalizeRuntimePathForComparison } from '../../../../shared/file-access/cross-platform-path'
 
 let directory: string
 let initialHead: string
@@ -63,15 +64,19 @@ afterEach(async () => {
   await rm(directory, { recursive: true, force: true })
 })
 
-it('switches an exact local target and records it', async () => {
+it('switches to the listed local branch even when a tag shares its name', async () => {
   await git('branch', 'feature')
+  await git('commit', '--allow-empty', '-qm', 'tag target')
+  await git('tag', 'feature')
+  const { branches } = await listLocalBranches(directory)
+  expect(branches).toEqual(['main', 'feature'])
   const recorded = vi.fn()
-  expect(await switchTo({ kind: 'local', name: 'feature' }, null, recorded)).toEqual({
+  expect(await switchTo({ kind: 'local', name: branches[1] }, null, recorded)).toEqual({
     branch: 'feature',
     previousBranch: 'main',
     head: initialHead
   })
-  expect(await git('symbolic-ref', '--short', 'HEAD')).toBe('feature')
+  expect(await git('symbolic-ref', 'HEAD')).toBe('refs/heads/feature')
   expect(recorded).toHaveBeenCalledOnce()
 })
 it.each(['team/upstream', 'origin'])(
@@ -233,11 +238,41 @@ it('reads live worktree occupancy and discovers remotes despite 50 local matches
   })
   expect(transaction.code).toBe(0)
   const page = await searchRemoteRefPage(directory, 'topic', 50)
-  expect(page.refDetails).toEqual([{ refName: 'origin/topic', localBranchName: 'topic' }])
+  expect(page.refDetails).toEqual([
+    { refName: 'refs/remotes/origin/topic', localBranchName: 'topic' }
+  ])
   const occupied = join(directory, '.git', 'checkout-test')
+  const occupiedKey = normalizeRuntimePathForComparison(occupied)
   await git('worktree', 'add', '-q', occupied, 'topic-0')
-  expect((await listLocalBranches(directory)).worktreePaths?.['topic-0']).toBe(occupied)
+  expect(
+    normalizeRuntimePathForComparison(
+      (await listLocalBranches(directory)).worktreePaths?.['topic-0'] ?? ''
+    )
+  ).toBe(occupiedKey)
   await git('worktree', 'remove', occupied)
   expect((await listLocalBranches(directory)).worktreePaths?.['topic-0']).toBeUndefined()
+  await git('worktree', 'add', '-q', occupied, 'topic-1')
+  await rm(occupied, { recursive: true })
+  expect(
+    normalizeRuntimePathForComparison(
+      (await listLocalBranches(directory)).worktreePaths?.['topic-1'] ?? ''
+    )
+  ).toBe(occupiedKey)
+  await git('checkout', '-qb', 'external-current')
+  const updated = await listLocalBranches(directory)
+  expect(updated.current).toBe('external-current')
+  expect(updated.branches[0]).toBe('external-current')
+  expect(updated.branches).toContain('topic-0')
+  expect(updated.branches).toContain('topic-9')
+})
+it('does not overlay an unborn local branch over a remote branch', async () => {
+  await git('update-ref', 'refs/remotes/origin/main', initialHead)
+  await git('update-ref', '-d', 'refs/heads/main')
+  const local = await listLocalBranches(directory)
+  expect(local.current).toBeNull()
+  expect(local.branches).toEqual([])
+  expect((await searchRemoteRefPage(directory, 'main', 30)).refDetails).toEqual([
+    { refName: 'refs/remotes/origin/main', localBranchName: 'main' }
+  ])
 })
 installRealWorkerThreadChildProcesses()

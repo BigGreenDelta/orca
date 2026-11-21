@@ -1,19 +1,21 @@
-import type { GlobalSettings } from '../../global-settings-types'
+import type { GlobalSettings } from '../../settings/global-settings-types'
 import type { SessionOptionValue } from '../../native-chat/input/native-chat-session-options'
 import type { TuiAgent } from '../catalog/tui-agent'
+import { applyAgentCopyFromOptions } from '../catalog/agent-copies'
 import {
   agentLaunchPermissionSettings,
   resolveTuiAgentLaunchEnv
 } from '../choices/tui-agent-launch-defaults'
 import { resolveStartupShell, type AgentStartupShell } from './tui-agent-startup-shell'
 import { terminalSessionOptionInputs } from './tui-agent-launch-command'
-import { resolveLocalWindowsAgentStartupShell } from '../../windows-terminal-shell'
+import { resolveLocalWindowsAgentStartupShell } from '../../shell/launch/windows-terminal-shell'
 
 /** The settings slice a launch reads; hosts pass their whole `GlobalSettings` row. */
 export type AgentStartupSettings = Partial<
   Pick<
     GlobalSettings,
     | 'agentCmdOverrides'
+    | 'agentCopies'
     | 'agentDefaultArgs'
     | 'agentLaunchChoices'
     | 'agentDefaultEnv'
@@ -55,7 +57,11 @@ export function resolveAgentStartupPlanInputs(args: {
   suppressStartupUpdatePrompt?: boolean
 }): AgentStartupPlanInputs {
   const { agent, platform, isRemote, sessionOptions } = args
-  const settings = agentLaunchPermissionSettings(agent, args.settings, sessionOptions)
+  const settings = agentLaunchPermissionSettings(
+    agent,
+    applyAgentCopyFromOptions(agent, args.settings, sessionOptions),
+    sessionOptions
+  )
   const shell =
     args.shell ??
     resolveLocalWindowsAgentStartupShell({
